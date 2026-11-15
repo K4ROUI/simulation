@@ -1,263 +1,121 @@
-# Simulation de Protocole MAC avec Exponential Backoff
+# Simulation d'un protocole MAC avec backoff exponentiel
 
-## 📋 Vue d'ensemble
+**Projet universitaire — réseaux informatiques · Python · simulation à événements discrets**
 
-Ce projet simule un **protocole MAC (Medium Access Control)** avec algorithme **Exponential Backoff**. L'objectif est de modéliser comment plusieurs stations partagent un canal de communication sans collision, en utilisant des délais aléatoires progressifs.
+Ce dépôt contient un **simulateur pédagogique de partage d'un canal entre plusieurs stations**. Chaque station reçoit des paquets, les place dans une file d'attente et tente de les transmettre. Lorsque deux émissions se chevauchent, le modèle enregistre une collision et programme de nouvelles tentatives avec un **temps d'attente aléatoire de moyenne croissante**.
 
----
+Il permet d'étudier l'influence du **nombre de stations N**, du **taux d'arrivée λ**, de la **capacité de file K** et du **paramètre de backoff τ** sur le débit et les pertes liées à la saturation des files.
 
-## 🎯 Idée générale
+> Il s'agit d'un **modèle MAC simplifié**, pas d'une implémentation conforme d'Ethernet IEEE 802.3 ou du Wi-Fi IEEE 802.11. Aucune performance réseau physique n'est mesurée.
 
-### Le problème
-- **N stations** veulent transmettre des paquets sur un **même canal**
-- Si 2+ stations transmettent simultanément → **COLLISION** (perte de paquets)
-- Comment éviter les collisions ?
+## Démarrer en quelques minutes
 
-### La solution : Exponential Backoff
-Quand une collision se produit :
-1. La station attend un délai aléatoire
-2. Ce délai **double** à chaque collision successive
-3. Après succès → retour à l'état initial
+Prévoir **Python 3.10 ou plus récent** et installer les dépendances :
 
-**Bénéfice :** Éloigne les tentatives de transmission, réduit les collisions
-
----
-
-## ⚙️ Algorithme expliqué
-
-### État et transitions
-Chaque station maintient un **état i** (commence à i=1) :
-
-```
-Queue vide → Arrive un paquet
-   ↓
-État i = 1 → Attendre Exp(mean=2¹×τ)
-   ↓
-TRANSMISSION (1 unité de temps)
-   ↓
-Collision? → État i → i+1, attendre Exp(mean=2^i×τ)
-Succès? → État i → 1, continuer
-```
-
-### Exemple concret
-- **État 1** : délai moyen = 2×τ = 2 secondes
-- **État 2** : délai moyen = 4×τ = 4 secondes (collision 1)
-- **État 3** : délai moyen = 8×τ = 8 secondes (collision 2)
-- **État 4** : délai moyen = 16×τ = 16 secondes (collision 3)
-
-Les délais **doublent** à chaque collision !
-
----
-
-## 📊 La loi exponentielle
-
-### Formule mathématique
-$$f(x) = \frac{1}{\mu} e^{-x/\mu}$$
-
-où μ = mean (valeur moyenne)
-
-### Propriétés clés
-1. **Génère des durées aléatoires** très variables
-   - Peuvent être très courtes ou très longues
-   - Modélise des arrivals naturelles
-
-2. **"Sans mémoire"** (memoryless)
-   - Peu importe le temps passé
-   - La durée restante suit toujours la même distribution
-   - Idéal pour simuler des événements indépendants
-
-3. **À x = μ** : 63.2% des durées ≤ mean
-
-### Utilisation dans le code
-
-**Inter-arrivées (paquets qui arrivent):**
-```python
-duree_exp(lam)  →  np.random.exponential(1/lam)
-```
-- Si λ = 0.2 → mean = 5 secondes
-- Chaque paquet arrive après ~5 sec en moyenne
-
-**Délais de backoff (après collision):**
-```python
-np.random.exponential((2**etats[s]) * tau)
-```
-- État i → délai moyen = 2^i × τ
-- Délais augmentent exponentiellement
-
----
-
-## 🔧 Utilisation
-
-### Installation
 ```bash
-pip install numpy
+python -m pip install -r requirements.txt
 ```
 
-### Importer et utiliser
+Pour exécuter le programme historique avec ses graphiques interactifs :
+
+```bash
+python simulation.py
+```
+
+Pour obtenir une exécution **reproductible**, fixer une graine et une durée :
+
+```bash
+python exemple_reproductible.py --graine 2026 --horizon 3000
+```
+
+Pour générer une étude reproductible en fonction de λ, des fichiers CSV et des graphiques :
+
+```bash
+python analyse_lambda.py --graine 2026 --repetitions 5 --horizon 3000
+```
+
+Le dossier `resultats/` est généré localement et ignoré par Git ; les valeurs numériques affichées sont issues de **chaque exécution réelle**, et non d'un résultat codé en dur.
+
+## Paramètres
+
+| Paramètre | Sens | Exemple |
+| --- | --- | --- |
+| `N` | Nombre de stations | 5 |
+| `K` | Capacité maximale de la file par station | 10 |
+| `lam` (λ) | Taux d'arrivée des paquets *par station* | 0,1 |
+| `tau` (τ) | Paramètre de base du temps d'attente | 1,0 |
+| `TEMPS_MAX` | Horizon de simulation dans le code original | 20 000 |
+
+Les arrivées sont tirées avec `np.random.exponential(1 / lam)`, donnant un temps moyen entre arrivées de `1 / λ`. Un paquet déjà dans la file reste à transmettre ; une **nouvelle arrivée** est comptée comme perdue lorsque la file est pleine.
+
+## Fonctionnement du simulateur
+
+Les événements planifiés dans une **file de priorité** (`heapq`) sont :
+
+1. `ARRIVEE` — réception d'un paquet par une station ;
+2. `DEBUT_EMISSION` — début de transmission et test de chevauchement ;
+3. `FIN_EMISSION` — succès ou collision, puis éventuelle retransmission.
+
+Chaque transmission occupe **une unité de temps** dans le modèle. Le délai de backoff suit une loi exponentielle de moyenne `2^i × τ`, où `i` est l'état de la station. **Le code commence à l'état 1 et incrémente cet état après le tirage du délai suivant une collision** : la première retransmission conserve donc la moyenne `2τ`, avant une augmentation aux collisions suivantes.
+
+Voir [la lecture critique du modèle](docs/modele-et-limites.md).
+
+## API Python
+
 ```python
+import numpy as np
 from simulation import simulateur_mac
 
-# Lancer une simulation
-N = 5              # 5 stations
-K = 10             # queue capacity
-lam = 0.2          # taux d'arrivée (inter-arrivées moyennes = 1/0.2 = 5 sec)
-tau = 1.0          # base backoff parameter
+np.random.seed(2026)  # reproductibilité
+historique_debit, historique_moyen, taux_perte, debit_final = simulateur_mac(
+    N=5, K=10, lam=0.1, tau=1.0
+)
 
-hist_debit, hist_moyen, taux_perte, debit_final = simulateur_mac(N, K, lam, tau)
-
-print(f"Débit final: {debit_final:.4f} paquets/s")
-print(f"Taux de perte: {taux_perte*100:.2f}%")
+print("Débit final du modèle :", debit_final)
+print("Part d'arrivées perdues :", taux_perte)
 ```
 
-### Paramètres
-| Paramètre | Description | Exemple |
-|-----------|-------------|---------|
-| `N` | Nombre de stations | 2-10 |
-| `K` | Capacité de queue par station | 10 |
-| `lam` (λ) | Taux d'arrivée par station | 0.1-0.6 |
-| `tau` (τ) | Base backoff parameter | 1.0 |
+La fonction renvoie :
 
-### Sorties
-- `hist_debit` : débit instantané n(t)/t au fil du temps
-- `hist_moyen` : nombre moyen de paquets L(t) = n_cumul/t (Little's Law)
-- `taux_perte` : % paquets perdus (queue full)
-- `debit_final` : débit final après 20000 secondes
+- `historique_debit` : paires `(temps, succès_cumulés / temps)`, **débit cumulé moyen**, et non débit instantané ;
+- `historique_moyen` : paires `(temps, aire_de_l'occupation / temps)`, approximation du **nombre moyen de paquets dans le système** ;
+- `taux_perte` : fraction des arrivées rejetées parce que leur file était pleine ; **les collisions ne sont pas comptées directement comme pertes définitives** ;
+- `debit_final` : nombre de transmissions réussies divisé par le temps final du simulateur.
 
----
+Le code historique démarre à `t = 1`. Il traite l'événement suivant tant que la boucle a commencé avant `TEMPS_MAX` ; le dernier événement peut donc dépasser légèrement l'horizon configuré.
 
-## 📈 Métriques clés
+## Analyse reproductible
 
-### Débit du système
-$$d = \frac{\text{paquets succès}}{\text{temps total}}$$
-- Plus N augmente → débit baisse (plus de collisions)
-- Plus λ augmente → débit baisse (plus de charge)
+Le script `analyse_lambda.py` :
 
-### Taux de perte
-$$\text{perte} = \frac{\text{paquets perdus (queue full)}}{\text{paquets entrés}}$$
-- Dépend de K (capacité queue) et charge (λ)
+- utilise une **graine initiale explicite** et des graines distinctes pour chaque répétition ;
+- exécute plusieurs simulations pour chaque valeur de λ ;
+- calcule le **débit moyen simulé** et la **perte moyenne par saturation** ;
+- exporte un CSV et deux graphiques dans `resultats/`.
 
-### Nombre moyen dans le système (Little's Law)
-$$L = \lambda W$$
-où :
-- L = nombre moyen de paquets en système
-- λ = taux d'arrivée
-- W = temps moyen en système
+Les courbes ne sont pas universelles : elles dépendent du modèle, des paramètres, de l'horizon et des graines. **On ne peut pas affirmer que le débit baisse toujours quand N ou λ augmente.**
 
-**Calcul via intégrale :**
-$$L = \frac{1}{T} \int_0^T n(t) \, dt$$
+## Vérifications
 
-Dans le code :
-```python
-n_cumul += n_paquets_systeme * (evt[0] - t)  # Accumule aire sous courbe
-L_moyen = n_cumul / t_final
+```bash
+python -m unittest discover -s tests -v
 ```
 
----
+Les tests portent sur la **forme des sorties, les bornes des statistiques, la reproductibilité à graine fixée et l'ordre chronologique des historiques**. Ils ne prouvent ni l'exactitude d'un modèle de norme IEEE, ni les performances d'un réseau réel.
 
-## 🔍 Structure du code
+## Fichiers
 
-### Fonction principale
-```python
-def simulateur_mac(N, K, lam, tau):
-    # Initialisation
-    t = 1
-    queues = {s: 0 for s in range(N)}           # Nb paquets par station
-    etats = {s: 1 for s in range(N)}            # État backoff par station
-    transmissions_en_cours = {}                  # Stations transmettant maintenant
-    
-    # Boucle principale (événements discrets)
-    while echeancier and t < TEMPS_MAX:
-        # Traiter événement le plus proche
-        evt = heappop(echeancier)
-        
-        if evt[1] == "ARRIVEE":
-            # Nouveau paquet arrive
-            # Si queue non pleine → ajouter, sinon perdre
-            # Si queue était vide → commencer transmission
-            
-        elif evt[1] == "DEBUT_EMISSION":
-            # Détection collision
-            if len(transmissions_en_cours) > 0:  # Quelqu'un déjà transmet
-                collision = True
-            # Ajouter à transmissions_en_cours
-            
-        elif evt[1] == "FIN_EMISSION":
-            # Transmission finit
-            if collision:
-                # Attendre délai backoff (double)
-            else:
-                # Succès! Reset état, continuer queue
+```text
+simulation.py                # Simulateur original et graphiques historiques
+exemple_reproductible.py     # Exécution avec paramètres et graine explicites
+analyse_lambda.py            # Répétitions et export CSV/PNG
+requirements.txt             # Dépendances Python
+tests/test_simulation.py     # Vérifications automatiques simples
+docs/modele-et-limites.md    # Hypothèses et limites techniques
+Rapport_Simulation.pdf       # Rapport académique conservé
+projet_2026.pdf              # Document académique conservé
 ```
 
-### Événements (Discrete Event Simulation)
-1. **ARRIVEE** : Nouveau paquet pour une station
-2. **DEBUT_EMISSION** : Station commence à transmettre
-3. **FIN_EMISSION** : Transmission finie (1 sec), vérifier collision
+Les deux PDF sont fournis à titre de documents du projet ; leur contenu n'est pas requis pour exécuter le code.
 
-### Structures de données
-```python
-queues = {0: 2, 1: 0, 2: 1, ...}           # Paquets en attente par station
-etats = {0: 1, 1: 3, 2: 1, ...}            # État backoff (i) par station
-transmissions_en_cours = {0: False, 2: True, ...}  # Qui transmet + collision?
-echeancier = [(t1, type, s), (t2, type, s), ...]  # Heap d'événements triés par temps
-```
-
----
-
-## 🧪 Exemple de résultat
-
-Pour N=2, λ=0.2, τ=1.0, K=10 :
-```
-Débit final: 0.2535 paquets/s
-Taux de perte: 36.50%
-Nombre moyen en système: ~3.2 paquets
-```
-
-Plus N augmente :
-- Débit diminue (plus d'interférence)
-- Collisions plus fréquentes
-- Délais de backoff augmentent
-
----
-
-## 📚 Concept clé : Pourquoi Exponential Backoff ?
-
-| Sans backoff | Avec backoff simple | Avec Exp. Backoff |
-|---|---|---|
-| Collision → relancer immédiat | Collision → attendre fixe (ex: 1s) | Collision → attendre 2^i×τ |
-| Collisions massives | Certaines relances coincident | Probabilité collision ↓↓ |
-| Débit très bas | Débit moyen | Débit élevé |
-
-Le **doubling** (2^i) est crucial : après 3 collisions, une station attend ~8 secondes avant de retenter, laissant le temps aux autres de transmettre. C'est une **priorisation naturelle et équitable** !
-
----
-
-## 📝 Notes
-
-- Simulation démarre à **t=1** (pas t=0)
-- Transmission dure **1 unité de temps**
-- Queue max **K=10** paquets par station
-- Simulation s'arrête à **TEMPS_MAX = 20000 secondes**
-- Collision détectée au **DÉBUT** de transmission (pas à la fin)
-
----
-
-## 📊 Résultats
-
-Voir `Rapport_Simulation (2).pdf` pour :
-- Graphes de convergence du débit
-- Variation en fonction de λ
-- N optimal pour maximiser débit
-- Intervalles de confiance à 95%
-
----
-
-## 📖 Références
-
-- **Protocole Ethernet**: IEEE 802.3 - Exponential Backoff
-- **Protocole WiFi**: IEEE 802.11 - DCF (Distributed Coordination Function)
-
----
-
-**Version:** Projet 2026
-**Protocole:** MAC avec Exponential Backoff
+**Ce que démontre ce projet :** programmation Python, simulation événementielle, gestion d'une file de priorité, métriques de réseaux et analyse expérimentale. Les scripts historiques restent inchangés.
