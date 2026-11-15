@@ -27,3 +27,7 @@ jobs:
         run: python -m unittest discover -s tests -v
       - name: Vérifier l'exemple reproductible
         run: python exemple_reproductible.py --graine 2026 --horizon 200
+      - name: Vérifier la génération des résultats expérimentaux
+        run: |
+          python analyse_lambda.py --graine 2026 --repetitions 2 --horizon 100 --sortie resultats
+          python -c "from pathlib import Path; p = Path('resultats'); assert all((p / name).is_file() for name in ('experiences_lambda.csv', 'debit_vs_lambda.png', 'perte_vs_lambda.png'))"
